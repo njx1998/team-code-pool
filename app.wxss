@@ -1,0 +1,41 @@
+/* 全局主题变量
+ * 学习要点：小程序支持 CSS 变量（基础库 2.9+）。把品牌色集中在 page 上定义，
+ * 页面样式只引用 var()，以后换主题只改这一个文件。
+ * 每个 var() 都带兜底值，万一变量失效样式也不会崩。
+ */
+page {
+  min-height: 100%;
+  background: #f6f7f9;
+  color: #1f2329;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+
+  /* ---- 品牌绿阶：50 最浅 → 800 最深 ---- */
+  --brand-50: #f2fbf6;   /* 码框底、弹窗留白 */
+  --brand-100: #e7f7ee;  /* 次级按钮底 */
+  --brand-200: #cfeedd;  /* 按压态（浅底按钮） */
+  --brand-500: #0cae63;  /* 数字、强调字（大号粗体） */
+  --brand-600: #0b8f52;  /* 实心按钮、下划线、边框 */
+  --brand-700: #0a7d4a;  /* 浅底上的绿字 */
+  --brand-800: #08663c;  /* 按压态（实心按钮） */
+
+  /* ---- 中性色 ---- */
+  --bg-page: #f6f7f9;
+  --bg-subtle: #f0f1f4;
+  --bg-muted: #f2f3f5;
+  --border-light: #eceff2;
+  --border-input: #e7e9ec;
+
+  /* ---- 文字 ---- */
+  --text-primary: #1f2329;
+  --text-secondary: #5f6771;
+  --text-tertiary: #8a9099;
+  --text-placeholder: #b8bec6;
+  --text-disabled: #8a9099;  /* 禁用文字：能看出灰，但仍可读 */
+
+  /* ---- 语义色 ---- */
+  --danger: #cf2e2e;         /* 举报、危险操作，只用于文字 */
+}
+
+button {
+  border-radius: 12rpx;
+}
