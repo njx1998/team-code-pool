@@ -1,7 +1,6 @@
 /**
  * index.js —— 页面逻辑
  *
- * 学习要点：
  * 1. 页面不直接生成数据，全部通过 utils/request.js 拿；
  * 2. WXML 里不能写表达式函数，所有展示用的衍生数据（过滤列表、统计数字）
  *    都在这里算好再 setData；
@@ -82,7 +81,7 @@ Page({
 
   async onSubmit() {
     const code = (this.data.inputCode || '').trim();
-    // 校验：只允许 8/9 位纯数字 —— 前端先挡一道，真实项目后端还要再校验
+    // 校验：只允许 8/9 位纯数字 —— 前端先挡一道，服务端还要再校验
     if (!/^\d{8,9}$/.test(code)) {
       wx.showToast({ title: '请输入 8/9 位数字组队码', icon: 'none' });
       return;
@@ -92,7 +91,7 @@ Page({
     this.setData({
       pool,
       inputCode: '',
-      // 提交成功：发码人数 +1，新码可用所以可用数 +1（真实产品由服务端统计）
+      // 提交成功：发码人数 +1，新码可用所以可用数 +1
       stats: {
         ...this.data.stats,
         todayCount: this.data.stats.todayCount + 1,
@@ -153,7 +152,7 @@ Page({
   },
 
   // ---- 账号状态查询 ----
-  // 真实项目：调接口返回当前账号的风控状态（正常/受限/封禁），这里直接展示
+  // 当前账号的风控状态（正常/受限/封禁），后续由服务端接口返回
   onCheckAccount() {
     wx.showToast({
       title: '当前账号状态' + this.data.accountStatus,
@@ -228,9 +227,8 @@ Page({
   stopBubble() {},
 
   // ---- 举报 ----
-  // 真实产品的举报链路：用户选理由 → 前端上报(码id + 理由 + 举报人) →
+  // 举报链路：用户选理由 → 上报(码id + 理由 + 举报人) →
   // 服务端给这条码累计举报数，超过阈值自动下架，并给提交者扣信用分/限制发码。
-  // 这里用 showActionSheet 选理由，mock 提交后把该码从列表移除，模拟"下架"。
   onReport(e) {
     const id = e.currentTarget.dataset.id || '';
     wx.showActionSheet({

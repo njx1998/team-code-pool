@@ -1,12 +1,10 @@
 /**
  * request.js —— 数据请求层（微信云开发 · 云数据库版）
  *
- * 学习要点：
  * 1. 页面永远只调这一层的 API，不直接碰数据来源 —— 这层换了实现，页面一行不用改。
  * 2. 云数据库客户端直连：写入的文档会自动带上 _openid（提交者身份），
- *    查询/修改受集合安全规则约束（本项目为学习用：read/write 全放开）。
- * 3. 真实产品里建议把写操作放进云函数（服务端可信环境），在函数里做频控、
- *    黑名单、举报防刷等 —— 客户端直连只适合学习和小流量场景。
+ *    查询/修改受集合安全规则约束。
+ * 3. 写操作的频控、黑名单、举报防刷等校验，后续通过云函数在服务端完成。
  *
  * 数据结构（集合 codes）：
  *   {
@@ -17,13 +15,17 @@
  *   }
  */
 
-const mock = require('./mock');
-
 // 云数据库引用（app.js 里 wx.cloud.init 之后可用）
 const db = wx.cloud.database();
 const cmd = db.command;
 
 // ==================== 工具函数 ====================
+
+// 掩码展示：前 3 位 + ** + 后 4 位，例如 278**3386
+// 敏感信息只在展示层打码，完整数据仍需传给需要的地方
+function maskCode(code) {
+  return code.slice(0, 3) + '**' + code.slice(-4);
+}
 
 // 相对时间文案：刚刚 / 5分钟前 / 3小时前 / 2天前
 function timeAgo(ts) {
@@ -47,10 +49,10 @@ function toPoolItem(doc) {
   return {
     id: doc._id,
     codeFull: doc.code,
-    codeMasked: mock.maskCode(doc.code),
+    codeMasked: maskCode(doc.code),
     digits: doc.code.length,
     timeText: timeAgo(doc.createdAt),
-    ipMasked: '', // 客户端拿不到真实 IP；要 IP 得走云函数，学习版先留空
+    ipMasked: '', // 客户端拿不到真实 IP；需要 IP 时由云函数在服务端获取
     status: doc.status,
   };
 }
@@ -124,7 +126,7 @@ async function fetchMyRecords() {
 }
 
 // 提交一个组队码：写入云数据库，返回页面格式的池记录
-// 真实项目里这里应该做频控（一人一天最多几条）、黑名单校验 —— 需云函数
+// TODO: 频控（一人一天最多几条）、黑名单校验 —— 由云函数完成
 async function submitCode(code) {
   const addRes = await db.collection('codes').add({
     data: {
@@ -138,7 +140,7 @@ async function submitCode(code) {
   const item = {
     id: addRes._id,
     codeFull: code,
-    codeMasked: mock.maskCode(code),
+    codeMasked: maskCode(code),
     digits: code.length,
     timeText: '刚刚',
     ipMasked: '',
@@ -173,7 +175,7 @@ async function markUsed(id) {
 }
 
 // 举报一条码：举报数 +1（原子自增），满 3 次自动下架
-// 防刷说明：真实项目要"同一用户对同一码只能举报一次"，需云函数查 reporters
+// TODO: 同一用户对同一码限报一次 —— 由云函数查 reporters 集合实现
 async function reportCode(id, reasonIndex) {
   const reasons = ['码无法使用', '码已过期', '广告或恶意码', '其他问题'];
 

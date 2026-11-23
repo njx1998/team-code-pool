@@ -1,5 +1,5 @@
 {
-  "description": "WorkBuddy 原生微信小程序基础模板",
+  "description": "组队码互助池小程序",
   "packOptions": {
     "ignore": [
       {
