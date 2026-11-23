@@ -25,11 +25,14 @@ function delay(ms) {
 }
 
 // 顶部统计：今日发码人数 / 可用数 / 累计次数
+// 这三个数字是服务端聚合出来的，前端不该自己算 —— 所以固定返回，
+// 等接了真后端，把这里换成真实接口即可，页面代码不用动
 async function fetchStats() {
   await delay(200);
   return {
-    todayCount: 4400 + mock.rand(0, 30), // 今天发码人数
-    totalText: '84.5万',                  // 累计使用次数（展示层直接用文案）
+    todayCount: 4401,   // 今天发码人数
+    availableCount: 2,  // 当前可用码数量
+    totalText: '84.5万', // 累计使用次数（展示层直接用文案）
   };
 }
 

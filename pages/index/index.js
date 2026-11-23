@@ -60,11 +60,11 @@ Page({
       api.fetchPool(),
       api.fetchMyRecords(),
     ]);
-    const availableCount = pool.filter((i) => i.status === 'available').length;
+    // 「可用」以服务端返回为准，不从本地列表数 —— 本地列表只是展示
     this.setData({
       stats: {
         todayCount: statsRes.todayCount,
-        availableCount,
+        availableCount: statsRes.availableCount,
         totalText: statsRes.totalText,
       },
       pool,
@@ -92,7 +92,12 @@ Page({
     this.setData({
       pool,
       inputCode: '',
-      stats: { ...this.data.stats, todayCount: this.data.stats.todayCount + 1 },
+      // 提交成功：发码人数 +1，新码可用所以可用数 +1（真实产品由服务端统计）
+      stats: {
+        ...this.data.stats,
+        todayCount: this.data.stats.todayCount + 1,
+        availableCount: this.data.stats.availableCount + 1,
+      },
     });
     this.applyFilter();
     wx.showToast({ title: '已提交到互助池', icon: 'success' });
@@ -202,9 +207,13 @@ Page({
     this.setData({
       pool,
       myCopied,
+      // 复制即视为已被领取：如果复制的是可用码，可用数 -1（相对变化，不重算）
       stats: {
         ...this.data.stats,
-        availableCount: pool.filter((i) => i.status === 'available').length,
+        availableCount: Math.max(
+          0,
+          this.data.stats.availableCount - (item.status === 'available' ? 1 : 0)
+        ),
       },
     });
     this.applyFilter();
@@ -238,12 +247,18 @@ Page({
       return;
     }
     // 如果举报的是池子里的码，从列表中移除（模拟达到阈值被下架）
+    const removed = this.data.pool.find((i) => i.id === id);
     const pool = this.data.pool.filter((i) => i.id !== id);
     this.setData({
       pool,
+      // 举报下架的是可用码时，可用数 -1
       stats: {
         ...this.data.stats,
-        availableCount: pool.filter((i) => i.status === 'available').length,
+        availableCount: Math.max(
+          0,
+          this.data.stats.availableCount -
+            (removed && removed.status === 'available' ? 1 : 0)
+        ),
       },
     });
     this.applyFilter();
