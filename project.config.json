@@ -1,12 +1,6 @@
 {
   "description": "组队码互助池小程序",
   "packOptions": {
-    "ignore": [
-      {
-        "type": "folder",
-        "value": ".workbuddy"
-      }
-    ],
     "include": []
   },
   "setting": {
