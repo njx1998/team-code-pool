@@ -1,85 +1,192 @@
 /**
- * request.js —— 数据请求层
+ * request.js —— 数据请求层（微信云开发 · 云数据库版）
  *
- * 学习要点：页面永远只调这一层的 API，不直接碰数据来源。
- * 现在每个方法内部走 mock；将来有真后端时，把方法体换成 wx.request 即可，
- * 页面代码不需要任何改动。这就是"前后端分离"里前端一侧的隔离做法。
+ * 学习要点：
+ * 1. 页面永远只调这一层的 API，不直接碰数据来源 —— 这层换了实现，页面一行不用改。
+ * 2. 云数据库客户端直连：写入的文档会自动带上 _openid（提交者身份），
+ *    查询/修改受集合安全规则约束（本项目为学习用：read/write 全放开）。
+ * 3. 真实产品里建议把写操作放进云函数（服务端可信环境），在函数里做频控、
+ *    黑名单、举报防刷等 —— 客户端直连只适合学习和小流量场景。
  *
- * 换成真接口的示例：
- *   function fetchPool() {
- *     return new Promise((resolve, reject) => {
- *       wx.request({
- *         url: 'https://your-server.com/api/pool',
- *         success: (res) => resolve(res.data),
- *         fail: reject,
- *       });
- *     });
+ * 数据结构（集合 codes）：
+ *   {
+ *     code: '283809300',      // 完整组队码
+ *     status: 'available',    // available 可用 / used 已用 / removed 已下架
+ *     reports: 0,             // 累计举报次数
+ *     createdAt: Date         // 提交时间（serverDate 服务端时间）
  *   }
  */
 
 const mock = require('./mock');
 
-// 模拟网络延迟，让 loading 状态真实可感
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// 云数据库引用（app.js 里 wx.cloud.init 之后可用）
+const db = wx.cloud.database();
+const cmd = db.command;
+
+// ==================== 工具函数 ====================
+
+// 相对时间文案：刚刚 / 5分钟前 / 3小时前 / 2天前
+function timeAgo(ts) {
+  const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
+  if (mins <= 0) return '刚刚';
+  if (mins < 60) return mins + '分钟前';
+  const h = Math.floor(mins / 60);
+  if (h < 24) return h + '小时前';
+  return Math.floor(h / 24) + '天前';
 }
 
-// 顶部统计：今日发码人数 / 可用数 / 累计次数
-// 这三个数字是服务端聚合出来的，前端不该自己算 —— 所以固定返回，
-// 等接了真后端，把这里换成真实接口即可，页面代码不用动
-async function fetchStats() {
-  await delay(200);
+// 绝对时间文案：11-23 22:15
+function fmtTime(ts) {
+  const d = new Date(ts);
+  const pad = (n) => (n < 10 ? '0' + n : '' + n);
+  return (d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+// 云文档 → 页面列表项的统一格式（页面只认这个形状）
+function toPoolItem(doc) {
   return {
-    todayCount: 2000,   // 今天发码人数
-    availableCount: 2,  // 当前可用码数量
-    totalText: '5000', // 累计使用次数（展示层直接用文案）
+    id: doc._id,
+    codeFull: doc.code,
+    codeMasked: mock.maskCode(doc.code),
+    digits: doc.code.length,
+    timeText: timeAgo(doc.createdAt),
+    ipMasked: '', // 客户端拿不到真实 IP；要 IP 得走云函数，学习版先留空
+    status: doc.status,
   };
 }
 
-// 互助池列表
+// 集合可能还没创建：包一层，失败时返回默认值并在控制台留原因，
+// 页面照常渲染空态，不至于卡在 loading
+async function safe(fn, fallback) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error('[云数据库调用失败]', err.errCode || '', err.errMsg || err.message || err);
+    if (String(err.errMsg || '').indexOf('collection') > -1) {
+      wx.showToast({ title: '请先在云控制台创建集合 codes', icon: 'none', duration: 3000 });
+    }
+    return fallback;
+  }
+}
+
+// ==================== 接口 ====================
+
+// 顶部统计：今日发码人数 / 可用数 / 累计提交数
+// 三个数字都是对 codes 集合的真实计数 —— 数据库为空时自然从 0 开始
+async function fetchStats() {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  return safe(async () => {
+    const [today, avail, total] = await Promise.all([
+      db.collection('codes').where({ createdAt: cmd.gte(todayStart) }).count(),
+      db.collection('codes').where({ status: 'available' }).count(),
+      db.collection('codes').count(),
+    ]);
+    return {
+      todayCount: today.total,
+      availableCount: avail.total,
+      totalText: String(total.total),
+    };
+  }, { todayCount: 0, availableCount: 0, totalText: '0' });
+}
+
+// 互助池列表：最近 20 条未下架的码，按提交时间倒序
 async function fetchPool() {
-  await delay(300);
-  return mock.seedPool(20);
+  return safe(async () => {
+    const res = await db
+      .collection('codes')
+      .where({ status: cmd.neq('removed') })
+      .orderBy('createdAt', 'desc')
+      .limit(20)
+      .get();
+    return res.data.map(toPoolItem);
+  }, []);
 }
 
 // 我的记录：我提交的 + 我复制的
+// 说明：客户端直连拿不到 openid（要云函数），所以"我的"记录存在本地
+// storage 里（id/码/时间戳），展示时用时间戳动态生成文案。
+// 换设备不同步 —— 想跨设备就后续把查询搬进云函数。
 async function fetchMyRecords() {
-  await delay(200);
-  return {
-    submitted: mock.seedMySubmitted(),
-    copied: mock.seedMyCopied(),
-  };
+  const submitted = (wx.getStorageSync('mySubmitted') || []).map((it) => ({
+    id: it.id,
+    codeMasked: it.codeMasked,
+    dateText: fmtTime(it.ts),
+  }));
+  const copied = (wx.getStorageSync('myCopied') || []).map((it) => ({
+    id: it.id,
+    codeMasked: it.codeMasked,
+    dateText: timeAgo(it.ts),
+    reportable: true,
+  }));
+  return { submitted, copied };
 }
 
-// 提交一个组队码到互助池
-// 返回新建的池记录；真实项目中这里会做频控、黑名单校验
+// 提交一个组队码：写入云数据库，返回页面格式的池记录
+// 真实项目里这里应该做频控（一人一天最多几条）、黑名单校验 —— 需云函数
 async function submitCode(code) {
-  await delay(400);
-  const item = mock.makePoolItem(0, 'available');
-  // 用用户真实输入的码覆盖随机码，保证掩码与输入一致
-  item.codeFull = code;
-  item.codeMasked = mock.maskCode(code);
-  item.digits = code.length;
+  const addRes = await db.collection('codes').add({
+    data: {
+      code: code,
+      status: 'available',
+      reports: 0,
+      createdAt: db.serverDate(), // 用服务端时间，避免手机时间不准
+    },
+  });
+
+  const item = {
+    id: addRes._id,
+    codeFull: code,
+    codeMasked: mock.maskCode(code),
+    digits: code.length,
+    timeText: '刚刚',
+    ipMasked: '',
+    status: 'available',
+  };
+
+  // 记进本地"我提交的"（最多留 50 条）
+  const list = wx.getStorageSync('mySubmitted') || [];
+  list.unshift({ id: addRes._id, codeMasked: item.codeMasked, ts: Date.now() });
+  wx.setStorageSync('mySubmitted', list.slice(0, 50));
+
   return item;
+}
+
+// 把复制的码记进本地"我复制的"（页面在复制成功后调用）
+function saveCopiedRecord(item) {
+  const list = wx.getStorageSync('myCopied') || [];
+  list.unshift({
+    id: 'copy-' + item.id,
+    codeMasked: item.codeMasked,
+    ts: Date.now(),
+  });
+  wx.setStorageSync('myCopied', list.slice(0, 50));
 }
 
 // 标记某条码为"已用"（复制后即视为已被领取）
 async function markUsed(id) {
-  await delay(100);
+  await db.collection('codes').doc(id).update({
+    data: { status: 'used' },
+  });
   return { id };
 }
 
-// 举报一条码
-// 真实项目：POST /api/report，body 带 { codeId, reason, reporterOpenId }
-// 服务端累计举报数，超过阈值下架该码并给提交者扣信用分；同一用户对同一码只能举报一次
+// 举报一条码：举报数 +1（原子自增），满 3 次自动下架
+// 防刷说明：真实项目要"同一用户对同一码只能举报一次"，需云函数查 reporters
 async function reportCode(id, reasonIndex) {
-  await delay(300);
   const reasons = ['码无法使用', '码已过期', '广告或恶意码', '其他问题'];
-  return {
-    id,
-    reason: reasons[reasonIndex],
-    accepted: true, // mock 永远受理；真实项目可能返回重复举报、频控等
-  };
+
+  const docRef = db.collection('codes').doc(id);
+  const doc = await docRef.get();
+  const reports = (doc.data && doc.data.reports ? doc.data.reports : 0) + 1;
+
+  const update = { data: { reports: cmd.inc(1) } };
+  const removed = reports >= 3;
+  if (removed) update.data.status = 'removed'; // 到阈值：下架（列表里不再出现）
+  await docRef.update(update);
+
+  return { id, reason: reasons[reasonIndex], accepted: true, removed };
 }
 
 module.exports = {
@@ -87,6 +194,7 @@ module.exports = {
   fetchPool,
   fetchMyRecords,
   submitCode,
+  saveCopiedRecord,
   markUsed,
   reportCode,
 };

@@ -192,6 +192,7 @@ Page({
     });
 
     await api.markUsed(id);
+    api.saveCopiedRecord(item); // 复制记录存本地，供"我复制的"展示
     const pool = this.data.pool.map((i) =>
       i.id === id ? { ...i, status: 'used' } : i
     );
@@ -246,12 +247,16 @@ Page({
       wx.showToast({ title: '举报失败，请稍后再试', icon: 'none' });
       return;
     }
-    // 如果举报的是池子里的码，从列表中移除（模拟达到阈值被下架）
+    // 云端真实状态：举报数 +1；达到 3 次才真正下架（removed 时才从列表移除）
+    if (!res.removed) {
+      wx.showToast({ title: '已提交举报，感谢反馈', icon: 'none' });
+      return;
+    }
     const removed = this.data.pool.find((i) => i.id === id);
     const pool = this.data.pool.filter((i) => i.id !== id);
     this.setData({
       pool,
-      // 举报下架的是可用码时，可用数 -1
+      // 下架的是可用码时，可用数 -1
       stats: {
         ...this.data.stats,
         availableCount: Math.max(
@@ -262,7 +267,7 @@ Page({
       },
     });
     this.applyFilter();
-    wx.showToast({ title: '已提交举报，感谢反馈', icon: 'none' });
+    wx.showToast({ title: '该码已被多人举报，已下架', icon: 'none' });
   },
 
   // ---- 下拉刷新 ----
