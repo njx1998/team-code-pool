@@ -30,9 +30,9 @@ function delay(ms) {
 async function fetchStats() {
   await delay(200);
   return {
-    todayCount: 4401,   // 今天发码人数
+    todayCount: 2000,   // 今天发码人数
     availableCount: 2,  // 当前可用码数量
-    totalText: '84.5万', // 累计使用次数（展示层直接用文案）
+    totalText: '5000', // 累计使用次数（展示层直接用文案）
   };
 }
 
