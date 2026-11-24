@@ -1,7 +1,14 @@
 {
   "description": "组队码互助池小程序",
   "packOptions": {
-    "include": []
+    "include": [],
+    "ignore": [
+      { "type": "file", "value": "README.md" },
+      { "type": "file", "value": "preview-qr.png" },
+      { "type": "file", "value": ".gitignore" },
+      { "type": "folder", "value": ".git" },
+      { "type": "folder", "value": ".workbuddy" }
+    ]
   },
   "setting": {
     "bundle": false,

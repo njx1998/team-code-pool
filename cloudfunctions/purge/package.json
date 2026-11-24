@@ -1,0 +1,9 @@
+{
+  "name": "purge",
+  "version": "1.0.0",
+  "description": "定时清理 14 天前的已用/下架码，控制集合体积",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

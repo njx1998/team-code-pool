@@ -7,7 +7,7 @@ App({
         } else {
             wx.cloud.init({
                 env: 'cloud1-d2ga7pm5qf05ea36e', // 你的云环境 ID
-                traceUser: true,                 // 在控制台用户管理里记录访问用户
+                // traceUser 已关闭：不记录访客明细，减少云端存储占用
             });
         }
     },

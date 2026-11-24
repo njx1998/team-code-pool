@@ -94,6 +94,8 @@ async function fetchStats() {
 }
 
 // 互助池列表：最近 20 条未下架的码，按提交时间倒序
+// field 投影只取渲染必需的 3 个字段 —— openid / secSuggest / reports
+// 等服务端字段不再传到手机，单次列表拉取的数据量更小、更快
 async function fetchPool() {
   return safe(async () => {
     const res = await db
@@ -101,6 +103,7 @@ async function fetchPool() {
       .where({ status: cmd.neq('removed') })
       .orderBy('createdAt', 'desc')
       .limit(20)
+      .field({ code: true, status: true, createdAt: true })
       .get();
     return res.data.map(toPoolItem);
   }, []);
@@ -173,42 +176,24 @@ async function markUsed(id) {
   return { id };
 }
 
-// 举报一条码：举报数 +1（原子自增），满 3 次自动下架
-// extraText：「其他问题」的自由描述 —— 非空时先过 secCheck 云函数内容安全校验
+// 举报一条码：整条链路收敛进 submit 云函数（action: 'report'）——
+// 1 次网络往返完成：自由描述过内容安全校验 → 原子举报数 +1 → 满阈值自动下架。
+// 之前是「secCheck 调用 + 读文档 + 写文档」3 次往返，且读改分离存在并发少计问题。
+// extraText：「其他问题」的自由描述，由云函数在服务端过 msgSecCheck
 async function reportCode(id, reasonIndex, extraText) {
-  const reasons = ['码无法使用', '码已过期', '广告或恶意码', '其他问题'];
-
-  const text = String(extraText || '').trim();
-  if (text) {
-    try {
-      const secRes = await wx.cloud.callFunction({
-        name: 'secCheck',
-        data: { content: text, scene: 2 }, // scene 2 = 评论场景
-      });
-      const r = secRes.result || {};
-      if (r.ok && !r.passed) {
-        // risky / review 都不给提交 —— 保守策略：人工复审期间的违规文本也不该入库
-        return { accepted: false, blocked: true, errMsg: '描述含违规内容，无法提交' };
-      }
-      if (!r.ok) {
-        // 接口异常不拦截举报主流程（与 submit 的可用性策略一致），留痕
-        console.error('[report] secCheck 校验异常:', r.errMsg, r.apiErrCode);
-      }
-    } catch (e) {
-      console.error('[report] secCheck 网络失败:', e.message);
-    }
+  const res = await wx.cloud.callFunction({
+    name: 'submit',
+    data: { action: 'report', id, reasonIndex, extraText },
+  });
+  const r = res.result || {};
+  if (!r.ok) {
+    return {
+      accepted: false,
+      blocked: r.errCode === 'CONTENT_RISKY',
+      errMsg: r.errMsg || '举报失败，请稍后再试',
+    };
   }
-
-  const docRef = db.collection('codes').doc(id);
-  const doc = await docRef.get();
-  const reports = (doc.data && doc.data.reports ? doc.data.reports : 0) + 1;
-
-  const update = { data: { reports: cmd.inc(1) } };
-  const removed = reports >= 3;
-  if (removed) update.data.status = 'removed'; // 到阈值：下架（列表里不再出现）
-  await docRef.update(update);
-
-  return { id, reason: reasons[reasonIndex], accepted: true, removed };
+  return { id, accepted: true, removed: !!r.removed };
 }
 
 module.exports = {

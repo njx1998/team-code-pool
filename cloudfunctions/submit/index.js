@@ -1,10 +1,14 @@
 /**
- * submit —— 提交组队码（云函数版）
+ * submit —— 写操作统一云函数（action 分发）
  *
- * 相比客户端直连数据库的升级点：
- * 1. 服务端格式校验 —— 客户端的校验只是体验优化，真正的拦截在这里
+ * 一次部署覆盖两类写操作，减少函数数量与冷启动：
+ *   - action 缺省  → 提交组队码
+ *   - action 'report' → 举报（服务端原子计数 + 满阈值自动下架）
+ *
+ * 升级点（相对客户端直连数据库）：
+ * 1. 服务端校验 —— 客户端的校验只是体验优化，真正的拦截在这里
  * 2. 频控 —— 同一用户一天最多提交 10 条，防灌水
- * 3. 身份记录 —— 服务端显式写入 _openid（服务端 add 不会自动带，必须手动存）
+ * 3. 身份记录 —— 服务端显式写入 openid（服务端 add 不会自动带，必须手动存）
  * 4. 服务端时间戳 —— 不信客户端时间
  */
 
@@ -14,8 +18,15 @@ const db = cloud.database();
 const _ = db.command;
 
 const DAILY_LIMIT = 10; // 一人一天最多提交数
+const REPORT_THRESHOLD = 3; // 举报满 3 次自动下架
 
 exports.main = async (event) => {
+  if (event.action === 'report') return doReport(event);
+  return doSubmit(event);
+};
+
+// ==================== 提交组队码 ====================
+async function doSubmit(event) {
   const { code } = event;
 
   // ---- 1. 格式校验：8/9 位纯数字 ----
@@ -107,4 +118,66 @@ exports.main = async (event) => {
   });
 
   return { ok: true, id: res._id };
-};
+}
+
+// ==================== 举报 ====================
+/**
+ * 举报链路在服务端一次完成：
+ * 1. 自由描述非空时先过 msgSecCheck（risky/review 都拦 —— 保守策略）
+ * 2. 原子条件更新：reports ≥ 2 的文档把本次举报连同下架一次写入，
+ *    否则只做 reports +1。全程无「先读后写」窗口，并发举报不会少计。
+ */
+async function doReport(event) {
+  const { id, reasonIndex, extraText } = event;
+
+  if (!/^[0-9a-zA-Z_-]{1,64}$/.test(String(id || ''))) {
+    return { ok: false, errCode: 'INVALID_ID', errMsg: '举报目标无效' };
+  }
+
+  const { OPENID } = cloud.getWXContext();
+  if (!OPENID) {
+    return { ok: false, errCode: 'NO_AUTH', errMsg: '无法获取用户身份' };
+  }
+
+  // ---- 1. 自由描述内容安全校验 ----
+  const text = String(extraText || '').trim();
+  if (text) {
+    if (text.length > 200) {
+      return { ok: false, errCode: 'TEXT_TOO_LONG', errMsg: '描述太长了，请精简后重试' };
+    }
+    try {
+      const sec = await cloud.openapi.security.msgSecCheck({
+        openid: OPENID,
+        scene: 2, // 评论场景
+        version: 2,
+        content: text,
+      });
+      const suggest = (sec.result && sec.result.suggest) || 'pass';
+      if (suggest !== 'pass') {
+        return {
+          ok: false,
+          errCode: 'CONTENT_RISKY',
+          errMsg: '描述含违规内容，无法提交',
+        };
+      }
+    } catch (e) {
+      // 安全接口异常不拦截举报主流程（可用性优先），留日志
+      console.error('[report] msgSecCheck 调用失败:', e.errCode, e.errMsg || e.message);
+    }
+  }
+
+  // ---- 2. 原子更新 ----
+  // 先尝试「满阈值即下架」：命中 reports ≥ 2 且未下架的文档，+1 后恰好为 3
+  const promote = await db
+    .collection('codes')
+    .where({ _id: id, reports: _.gte(REPORT_THRESHOLD - 1), status: _.neq('removed') })
+    .update({ data: { reports: _.inc(1), status: 'removed' } });
+
+  if (promote.stats.updated > 0) {
+    return { ok: true, id, removed: true };
+  }
+
+  // 普通举报：reports +1
+  await db.collection('codes').doc(id).update({ data: { reports: _.inc(1) } });
+  return { ok: true, id, removed: false };
+}
