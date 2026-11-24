@@ -1,0 +1,9 @@
+{
+  "name": "secCheck",
+  "version": "1.0.0",
+  "description": "通用文本内容安全校验（msgSecCheck v2）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

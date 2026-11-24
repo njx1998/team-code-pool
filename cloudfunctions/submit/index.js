@@ -49,13 +49,41 @@ exports.main = async (event) => {
     console.warn('[submit] 频控查询失败:', e.message);
   }
 
-  // ---- 4. 写入数据库 ----
+  // ---- 4. 内容安全校验（msgSecCheck v2）----
+  // 提交码目前是纯数字，天然低风险；这里校验是为了：(a) 平台合规硬要求 ——
+  // 用户产生内容必须过安全接口；(b) 未来加备注/昵称等文本字段时这里已经兜住。
+  // 注意：config.json 里必须声明 openapi 权限 security.msgSecCheck，否则报 -604103。
+  try {
+    const sec = await cloud.openapi.security.msgSecCheck({
+      openid: OPENID,
+      scene: 3, // 1 资料 2 评论 3 论坛 4 社交日志
+      version: 2,
+      content: String(code),
+    });
+    const suggest = (sec.result && sec.result.suggest) || 'pass';
+    if (suggest === 'risky') {
+      return {
+        ok: false,
+        errCode: 'CONTENT_RISKY',
+        errMsg: '内容含违规信息，已被拦截',
+      };
+    }
+    // suggest === 'review'（需人工复审）: 保守起见也放行入库，但打标
+    var secSuggest = suggest;
+  } catch (e) {
+    // 安全接口异常不拦截提交（可用性优先），留日志 —— 但要在云控制台关注该告警
+    console.error('[submit] msgSecCheck 调用失败:', e.errCode, e.errMsg || e.message);
+    var secSuggest = 'unknown';
+  }
+
+  // ---- 5. 写入数据库 ----
   const res = await db.collection('codes').add({
     data: {
       code: String(code),
       status: 'available',
       reports: 0,
       openid: OPENID, // 服务端 add 不自动带 _openid，手动记录
+      secSuggest, // 内容安全结论：pass / review / unknown（接口异常时）
       createdAt: db.serverDate(),
     },
   });
