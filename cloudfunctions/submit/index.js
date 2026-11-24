@@ -1,9 +1,10 @@
 /**
  * submit —— 写操作统一云函数（action 分发）
  *
- * 一次部署覆盖两类写操作，减少函数数量与冷启动：
+ * 一次部署覆盖三类写操作，减少函数数量与冷启动：
  *   - action 缺省  → 提交组队码
  *   - action 'report' → 举报（服务端原子计数 + 满阈值自动下架）
+ *   - action 'use'   → 复制后置已用（仅 available 可置 used）
  *
  * 升级点（相对客户端直连数据库）：
  * 1. 服务端校验 —— 客户端的校验只是体验优化，真正的拦截在这里
@@ -22,6 +23,7 @@ const REPORT_THRESHOLD = 3; // 举报满 3 次自动下架
 
 exports.main = async (event) => {
   if (event.action === 'report') return doReport(event);
+  if (event.action === 'use') return doUse(event);
   return doSubmit(event);
 };
 
@@ -177,7 +179,35 @@ async function doReport(event) {
     return { ok: true, id, removed: true };
   }
 
-  // 普通举报：reports +1
-  await db.collection('codes').doc(id).update({ data: { reports: _.inc(1) } });
+  // 普通举报：reports +1（where 条件更新：目标不存在时返回 updated 0，不抛错）
+  const incRes = await db
+    .collection('codes')
+    .where({ _id: id })
+    .update({ data: { reports: _.inc(1) } });
+  if (!incRes.stats.updated) {
+    // 两次更新都没命中：文档不存在（可能已被定时清理），明确报错而不是静默成功
+    return { ok: false, errCode: 'NOT_FOUND', errMsg: '该码不存在或已被清理' };
+  }
   return { ok: true, id, removed: false };
+}
+
+// ==================== 复制后置已用 ====================
+/**
+ * 客户端对他人文档没有写权限（集合安全规则），置已用必须走服务端。
+ * 原子条件更新：只有 status 仍为 available 才置 used，防并发误改。
+ */
+async function doUse(event) {
+  const { id } = event;
+
+  if (!/^[0-9a-zA-Z_-]{1,64}$/.test(String(id || ''))) {
+    return { ok: false, errCode: 'INVALID_ID', errMsg: '目标无效' };
+  }
+
+  await db
+    .collection('codes')
+    .where({ _id: id, status: 'available' })
+    .update({ data: { status: 'used' } });
+
+  // 已被别人置过 used / 已下架的幂等返回成功 —— 复制动作本身已成功
+  return { ok: true, id };
 }

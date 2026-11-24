@@ -44,6 +44,7 @@ Page({
     modal: {
       visible: false,
       code: '',
+      id: '', // 弹窗内举报要用文档 id —— 之前误传了完整组队码，导致举报静默无效
     },
   },
 
@@ -190,39 +191,43 @@ Page({
     const item = this.data.pool.find((i) => i.id === id);
     if (!item) return;
 
-    // 先弹窗、写剪贴板，再把状态置为已用并刷新过滤列表
-    this.setData({ modal: { visible: true, code: item.codeFull } });
-    wx.setClipboardData({
-      data: item.codeFull,
-      success: () => {
-        // 剪贴板写入成功后微信会自动弹 toast，这里不用再提示
-      },
-    });
+    // 先弹窗、写剪贴板 —— 用户拿到码不依赖后面的网络请求
+    this.setData({ modal: { visible: true, code: item.codeFull, id } });
+    wx.setClipboardData({ data: item.codeFull });
 
-    await api.markUsed(id);
-    api.saveCopiedRecord(item); // 复制记录存本地，供"我复制的"展示
-    const pool = this.data.pool.map((i) =>
-      i.id === id ? { ...i, status: 'used' } : i
-    );
+    api.saveCopiedRecord(item); // 复制记录存本地，供"我复制的"展示与举报
+
+    // 标记已用走云函数；失败时本地不置已用（服务端仍是可用状态，保持一致）
+    let marked = false;
+    try {
+      await api.markUsed(id);
+      marked = true;
+    } catch (err) {
+      wx.showToast({ title: '复制成功，但状态更新失败', icon: 'none', duration: 2500 });
+    }
+
     const myCopied = [
       {
-        id: 'copy-' + id,
+        id,
         codeMasked: item.codeMasked,
         dateText: item.timeText,
         reportable: true,
       },
       ...this.data.myCopied,
     ];
-    this.setData({
-      pool,
-      myCopied,
-    });
+    const updates = { myCopied };
+    if (marked) {
+      updates.pool = this.data.pool.map((i) =>
+        i.id === id ? { ...i, status: 'used' } : i
+      );
+    }
+    this.setData(updates);
     this.applyFilter();
-    this.refreshStats(); // 复制即视为已被领取：可用数由服务端重算
+    if (marked) this.refreshStats(); // 复制即视为已被领取：可用数由服务端重算
   },
 
   onCloseModal() {
-    this.setData({ modal: { visible: false, code: '' } });
+    this.setData({ modal: { visible: false, code: '', id: '' } });
   },
 
   // 阻止弹窗内容区的点击冒泡到遮罩层（WXML 里用 catchtap）
@@ -256,7 +261,14 @@ Page({
   },
 
   async doReport(id, reasonIndex, extraText) {
-    const res = await api.reportCode(id, reasonIndex, extraText);
+    let res;
+    try {
+      res = await api.reportCode(id, reasonIndex, extraText);
+    } catch (err) {
+      // 网络异常 / 云函数未部署等 —— 给用户明确反馈，而不是静默失败
+      wx.showToast({ title: '举报失败，请稍后再试', icon: 'none' });
+      return;
+    }
     if (res.blocked) {
       wx.showToast({ title: res.errMsg || '描述含违规内容，无法提交', icon: 'none', duration: 2500 });
       return;

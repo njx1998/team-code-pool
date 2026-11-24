@@ -167,7 +167,7 @@
       <view class="step-chip"><text class="step-num">2</text><text class="step-text">搜索以下数字邀请码</text></view>
       <view class="code-box">{{modal.code}}</view>
       <text class="copied-tip">✅ 邀请码已复制到剪贴板</text>
-      <text class="modal-report">该码无法使用？<text class="report-link" data-id="{{modal.code}}" bindtap="onReport">立即举报</text></text>
+      <text class="modal-report">该码无法使用？<text class="report-link" data-id="{{modal.id}}" bindtap="onReport">立即举报</text></text>
     </view>
   </view>
 </view>

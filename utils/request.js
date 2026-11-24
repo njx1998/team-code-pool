@@ -120,7 +120,8 @@ async function fetchMyRecords() {
     dateText: fmtTime(it.ts),
   }));
   const copied = (wx.getStorageSync('myCopied') || []).map((it) => ({
-    id: it.id,
+    // 历史版本存过 'copy-' 前缀 id，举报时要的是文档 id，统一剥掉
+    id: String(it.id || '').replace(/^copy-/, ''),
     codeMasked: it.codeMasked,
     dateText: timeAgo(it.ts),
     reportable: true,
@@ -158,10 +159,11 @@ async function submitCode(code) {
 }
 
 // 把复制的码记进本地"我复制的"（页面在复制成功后调用）
+// id 存文档原始 id（不带前缀）—— 举报时直接用它定位云文档
 function saveCopiedRecord(item) {
   const list = wx.getStorageSync('myCopied') || [];
   list.unshift({
-    id: 'copy-' + item.id,
+    id: item.id,
     codeMasked: item.codeMasked,
     ts: Date.now(),
   });
@@ -169,10 +171,12 @@ function saveCopiedRecord(item) {
 }
 
 // 标记某条码为"已用"（复制后即视为已被领取）
+// 走云函数而不是客户端直写：客户端对他人文档没有写权限（安全规则约束），
+// 服务端写入还能加"仅 available 可置 used"的原子约束，防误改
 async function markUsed(id) {
-  await db.collection('codes').doc(id).update({
-    data: { status: 'used' },
-  });
+  const res = await wx.cloud.callFunction({ name: 'submit', data: { action: 'use', id } });
+  const r = res.result || {};
+  if (!r.ok) throw new Error(r.errMsg || '状态更新失败');
   return { id };
 }
 
