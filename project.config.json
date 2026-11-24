@@ -11,6 +11,7 @@
     "urlCheck": true
   },
   "compileType": "miniprogram",
+  "cloudfunctionRoot": "cloudfunctions/",
   "appid": "wx948d81689638c34d",
   "projectname": "team-code-pool",
   "miniprogramRoot": "./"

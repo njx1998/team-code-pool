@@ -1,0 +1,9 @@
+{
+  "name": "submit",
+  "version": "1.0.0",
+  "description": "提交组队码：服务端校验 + 频控 + 入库",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

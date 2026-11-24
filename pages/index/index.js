@@ -86,7 +86,14 @@ Page({
       wx.showToast({ title: '请输入 8/9 位数字组队码', icon: 'none' });
       return;
     }
-    const item = await api.submitCode(code);
+    let item;
+    try {
+      item = await api.submitCode(code);
+    } catch (err) {
+      // 服务端拒绝（校验不过/频控/云函数未部署）：把原因告诉用户
+      wx.showToast({ title: err.message || '提交失败', icon: 'none', duration: 2500 });
+      return;
+    }
     const pool = [item, ...this.data.pool];
     this.setData({
       pool,

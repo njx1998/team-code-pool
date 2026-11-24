@@ -125,20 +125,19 @@ async function fetchMyRecords() {
   return { submitted, copied };
 }
 
-// 提交一个组队码：写入云数据库，返回页面格式的池记录
-// TODO: 频控（一人一天最多几条）、黑名单校验 —— 由云函数完成
+// 提交一个组队码：走云函数 submit（服务端校验 + 频控 + 入库），返回页面格式的池记录
+// 云函数负责真正的拦截：格式校验、一人一天 10 条频控、身份记录
 async function submitCode(code) {
-  const addRes = await db.collection('codes').add({
-    data: {
-      code: code,
-      status: 'available',
-      reports: 0,
-      createdAt: db.serverDate(), // 用服务端时间，避免手机时间不准
-    },
-  });
+  const res = await wx.cloud.callFunction({ name: 'submit', data: { code } });
+  const r = res.result || {};
+  if (!r.ok) {
+    const err = new Error(r.errMsg || '提交失败，请稍后再试');
+    err.errCode = r.errCode;
+    throw err;
+  }
 
   const item = {
-    id: addRes._id,
+    id: r.id,
     codeFull: code,
     codeMasked: maskCode(code),
     digits: code.length,
