@@ -241,13 +241,31 @@ Page({
     wx.showActionSheet({
       itemList: ['码无法使用', '码已过期', '广告或恶意码', '其他问题'],
       success: (res) => {
+        if (res.tapIndex === 3) {
+          // 「其他问题」给自由描述入口 —— 自由文本是内容安全重点区域，
+          // 先过 secCheck 云函数校验，risky 直接拦截
+          wx.showModal({
+            title: '描述一下问题',
+            editable: true,
+            placeholderText: '选填，说说什么情况',
+            success: (m) => {
+              if (!m.confirm) return;
+              this.doReport(id, 3, m.content || '');
+            },
+          });
+          return;
+        }
         this.doReport(id, res.tapIndex);
       },
     });
   },
 
-  async doReport(id, reasonIndex) {
-    const res = await api.reportCode(id, reasonIndex);
+  async doReport(id, reasonIndex, extraText) {
+    const res = await api.reportCode(id, reasonIndex, extraText);
+    if (res.blocked) {
+      wx.showToast({ title: res.errMsg || '描述含违规内容，无法提交', icon: 'none', duration: 2500 });
+      return;
+    }
     if (!res.accepted) {
       wx.showToast({ title: '举报失败，请稍后再试', icon: 'none' });
       return;

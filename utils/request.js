@@ -174,9 +174,30 @@ async function markUsed(id) {
 }
 
 // 举报一条码：举报数 +1（原子自增），满 3 次自动下架
-// TODO: 同一用户对同一码限报一次 —— 由云函数查 reporters 集合实现
-async function reportCode(id, reasonIndex) {
+// extraText：「其他问题」的自由描述 —— 非空时先过 secCheck 云函数内容安全校验
+async function reportCode(id, reasonIndex, extraText) {
   const reasons = ['码无法使用', '码已过期', '广告或恶意码', '其他问题'];
+
+  const text = String(extraText || '').trim();
+  if (text) {
+    try {
+      const secRes = await wx.cloud.callFunction({
+        name: 'secCheck',
+        data: { content: text, scene: 2 }, // scene 2 = 评论场景
+      });
+      const r = secRes.result || {};
+      if (r.ok && !r.passed) {
+        // risky / review 都不给提交 —— 保守策略：人工复审期间的违规文本也不该入库
+        return { accepted: false, blocked: true, errMsg: '描述含违规内容，无法提交' };
+      }
+      if (!r.ok) {
+        // 接口异常不拦截举报主流程（与 submit 的可用性策略一致），留痕
+        console.error('[report] secCheck 校验异常:', r.errMsg, r.apiErrCode);
+      }
+    } catch (e) {
+      console.error('[report] secCheck 网络失败:', e.message);
+    }
+  }
 
   const docRef = db.collection('codes').doc(id);
   const doc = await docRef.get();
