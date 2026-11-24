@@ -17,7 +17,7 @@ Page({
       availableCount: 0, // 从池子里实时算出来
       totalText: '84.5万',
     },
-    noticeText: '平台已处理 1450+ 条反馈，恶意提交、广告及无效组队码将被限制使用',
+    noticeText: '平台已处理 299 条反馈，恶意提交、广告及无效组队码将被限制使用',
     accountStatus: '正常',
 
     // ---- 发码表单 ----
@@ -74,6 +74,13 @@ Page({
     this.applyFilter();
   },
 
+  // 统计条永远以服务端为准：任何改变数据库的操作（提交/复制/举报下架）之后重拉一次。
+  // 之前在本地做加减法，累计数漏更新过 —— 与其到处打补丁，不如单一数据源。
+  async refreshStats() {
+    const s = await api.fetchStats();
+    this.setData({ stats: s });
+  },
+
   // ---- 发码表单 ----
   onInput(e) {
     this.setData({ inputCode: e.detail.value });
@@ -98,14 +105,9 @@ Page({
     this.setData({
       pool,
       inputCode: '',
-      // 提交成功：发码人数 +1，新码可用所以可用数 +1
-      stats: {
-        ...this.data.stats,
-        todayCount: this.data.stats.todayCount + 1,
-        availableCount: this.data.stats.availableCount + 1,
-      },
     });
     this.applyFilter();
+    this.refreshStats(); // 提交成功：今天/可用/累计都以服务端为准重新拉取
     wx.showToast({ title: '已提交到互助池', icon: 'success' });
   },
 
@@ -214,16 +216,9 @@ Page({
     this.setData({
       pool,
       myCopied,
-      // 复制即视为已被领取：如果复制的是可用码，可用数 -1（相对变化，不重算）
-      stats: {
-        ...this.data.stats,
-        availableCount: Math.max(
-          0,
-          this.data.stats.availableCount - (item.status === 'available' ? 1 : 0)
-        ),
-      },
     });
     this.applyFilter();
+    this.refreshStats(); // 复制即视为已被领取：可用数由服务端重算
   },
 
   onCloseModal() {
@@ -275,21 +270,10 @@ Page({
       wx.showToast({ title: '已提交举报，感谢反馈', icon: 'none' });
       return;
     }
-    const removed = this.data.pool.find((i) => i.id === id);
     const pool = this.data.pool.filter((i) => i.id !== id);
-    this.setData({
-      pool,
-      // 下架的是可用码时，可用数 -1
-      stats: {
-        ...this.data.stats,
-        availableCount: Math.max(
-          0,
-          this.data.stats.availableCount -
-            (removed && removed.status === 'available' ? 1 : 0)
-        ),
-      },
-    });
+    this.setData({ pool });
     this.applyFilter();
+    this.refreshStats(); // 下架影响可用数，由服务端重算
     wx.showToast({ title: '该码已被多人举报，已下架', icon: 'none' });
   },
 
