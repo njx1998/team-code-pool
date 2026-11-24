@@ -148,7 +148,7 @@ async function submitCode(code) {
 
   // 记进本地"我提交的"（最多留 50 条）
   const list = wx.getStorageSync('mySubmitted') || [];
-  list.unshift({ id: addRes._id, codeMasked: item.codeMasked, ts: Date.now() });
+  list.unshift({ id: r.id, codeMasked: item.codeMasked, ts: Date.now() });
   wx.setStorageSync('mySubmitted', list.slice(0, 50));
 
   return item;

@@ -49,6 +49,24 @@ exports.main = async (event) => {
     console.warn('[submit] 频控查询失败:', e.message);
   }
 
+  // ---- 3.5 查重：同一个码已在池中（未下架）就不许重复提交 ----
+  // 防止同一码刷屏占位；被举报下架（removed）的码允许重新提交
+  try {
+    const dup = await db
+      .collection('codes')
+      .where({ code: String(code), status: _.neq('removed') })
+      .count();
+    if (dup.total > 0) {
+      return {
+        ok: false,
+        errCode: 'DUPLICATE',
+        errMsg: '这个码已经在互助池里了，不用重复提交',
+      };
+    }
+  } catch (e) {
+    console.warn('[submit] 查重失败:', e.message); // 查重失败不拦截主流程
+  }
+
   // ---- 4. 内容安全校验（msgSecCheck v2）----
   // 提交码目前是纯数字，天然低风险；这里校验是为了：(a) 平台合规硬要求 ——
   // 用户产生内容必须过安全接口；(b) 未来加备注/昵称等文本字段时这里已经兜住。
