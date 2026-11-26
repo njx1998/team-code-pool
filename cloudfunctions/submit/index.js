@@ -20,36 +20,12 @@ const _ = db.command;
 
 const DAILY_LIMIT = 10; // 一人一天最多提交数
 const REPORT_THRESHOLD = 3; // 举报满 3 次自动下架
-const RETAIN_DAYS = 14; // 已用/下架码保留天数（与 purge 云函数保持一致）
 
 exports.main = async (event) => {
   if (event.action === 'report') return doReport(event);
   if (event.action === 'use') return doUse(event);
   return doSubmit(event);
 };
-
-/**
- * 惰性清理：不依赖定时触发器。
- * 云数据库不会自动过期，已用/下架的码堆着只会拖慢查询、占存储。
- * 每次成功提交后顺带删一批 14 天前的废弃码 —— 没有可删对象时 remove 返回
- * removed:0，成本就是一次极小的写请求，可以忽略。
- * 即使没配触发器的 purge 也照样能收敛集合体积（purge 负责大批量，这里负责保底）。
- */
-async function lazyPurge() {
-  const cutoff = new Date(Date.now() - RETAIN_DAYS * 86400000);
-  try {
-    const res = await db
-      .collection('codes')
-      .where({ status: _.in(['used', 'removed']), createdAt: _.lt(cutoff) })
-      .limit(50)
-      .remove();
-    const n = (res.stats && res.stats.removed) || 0;
-    if (n) console.log('[lazy-purge] 删除过期码:', n);
-  } catch (e) {
-    // 清理失败绝不能影响提交结果，只留日志
-    console.warn('[lazy-purge] 跳过:', e.errMsg || e.message);
-  }
-}
 
 // ==================== 提交组队码 ====================
 async function doSubmit(event) {
@@ -142,9 +118,6 @@ async function doSubmit(event) {
       createdAt: db.serverDate(),
     },
   });
-
-  // 顺手清理过期废弃码（不阻塞也不影响提交结果，函数内 await 保证执行完）
-  await lazyPurge();
 
   return { ok: true, id: res._id };
 }
