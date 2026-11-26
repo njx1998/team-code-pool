@@ -27,6 +27,25 @@ exports.main = async (event) => {
   return doSubmit(event);
 };
 
+// 清空 codes 集合：单次条件删除覆盖全部状态，失败时把原因带回给客户端
+async function doAdminClear() {
+  const bjDate = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  if (bjDate !== ADMIN_DATE) return { ok: false, errMsg: '指令已过期' };
+
+  try {
+    const res = await db
+      .collection('codes')
+      .where({ status: _.in(['available', 'used', 'removed']) })
+      .remove();
+    const deleted = res.stats.removed || 0;
+    console.log('[admin-clear] 已清空 codes:', deleted);
+    return { ok: true, deleted };
+  } catch (e) {
+    console.error('[admin-clear] 失败:', e.errCode, e.errMsg || e.message);
+    return { ok: false, errMsg: (e.errMsg || e.message || '删除失败') + '' };
+  }
+}
+
 // ==================== 提交组队码 ====================
 async function doSubmit(event) {
   const { code } = event;
