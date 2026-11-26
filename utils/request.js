@@ -15,9 +15,19 @@
  *   }
  */
 
-// 云数据库引用（app.js 里 wx.cloud.init 之后可用）
-const db = wx.cloud.database();
-const cmd = db.command;
+// 云数据库引用：懒加载 —— 模块顶层不能碰 wx.cloud，
+// 页面模块的求值早于 app.js onLaunch 里的 wx.cloud.init()，
+// 顶层直接调用会报 "Cannot read properties of undefined (reading 'database')"
+let _db = null;
+function getDb() {
+  if (!_db) {
+    if (!wx.cloud || !wx.cloud.database) {
+      throw new Error('云能力未就绪：基础库需 ≥ 2.2.3 且已开通云开发');
+    }
+    _db = wx.cloud.database();
+  }
+  return _db;
+}
 
 // ==================== 工具函数 ====================
 
@@ -80,6 +90,8 @@ async function fetchStats() {
   todayStart.setHours(0, 0, 0, 0);
 
   return safe(async () => {
+    const db = getDb();
+    const cmd = db.command;
     const [today, avail, total] = await Promise.all([
       db.collection('codes').where({ createdAt: cmd.gte(todayStart) }).count(),
       db.collection('codes').where({ status: 'available' }).count(),
@@ -98,6 +110,8 @@ async function fetchStats() {
 // 等服务端字段不再传到手机，单次列表拉取的数据量更小、更快
 async function fetchPool() {
   return safe(async () => {
+    const db = getDb();
+    const cmd = db.command;
     const res = await db
       .collection('codes')
       .where({ status: cmd.neq('removed') })
