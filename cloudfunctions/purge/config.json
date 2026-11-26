@@ -4,11 +4,6 @@
       "name": "daily-purge",
       "type": "timer",
       "config": "0 0 4 * * * *"
-    },
-    {
-      "name": "oneshot-clear",
-      "type": "timer",
-      "config": "0 5 19 * * * *"
     }
   ]
 }
