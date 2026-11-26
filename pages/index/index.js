@@ -94,14 +94,20 @@ Page({
       wx.showToast({ title: '请输入 8/9 位数字组队码', icon: 'none' });
       return;
     }
+    // 立即给反馈：云函数冷启动 + 写入通常要几百毫秒，没有 loading 会像"点了没反应"
+    const t0 = Date.now();
+    wx.showLoading({ title: '提交中', mask: true });
     let item;
     try {
       item = await api.submitCode(code);
     } catch (err) {
+      wx.hideLoading();
       // 服务端拒绝（校验不过/频控/云函数未部署）：把原因告诉用户
       wx.showToast({ title: err.message || '提交失败', icon: 'none', duration: 2500 });
       return;
     }
+    wx.hideLoading();
+    console.log('[submit] 云函数往返耗时:', Date.now() - t0, 'ms'); // 排查延迟用，可在调试器看
     const pool = [item, ...this.data.pool];
     this.setData({
       pool,

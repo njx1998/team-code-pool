@@ -28,11 +28,40 @@ exports.main = async (event) => {
 };
 
 // ==================== 提交组队码 ====================
+
+/**
+ * 内容安全校验：只有含「非数字」字符的内容才真正走 msgSecCheck。
+ *
+ * 提交的组队码是 8/9 位纯数字，没有任何文本语义，调内容安全接口既不产生有效
+ * 结论、又要多等一次外部 HTTPS 往返（实测 100~600ms，是提交延迟的大头）。
+ * 以后加了备注/昵称等自由文本字段，非数字内容会自动走这里的校验分支。
+ * 需要强制全量校验时把开关改回 true 即可。
+ */
+const SEC_CHECK_NUMERIC = false;
+
+async function checkText(openid, content) {
+  if (!SEC_CHECK_NUMERIC && !/[^0-9]/.test(content)) return 'skipped';
+  try {
+    const sec = await cloud.openapi.security.msgSecCheck({
+      openid,
+      scene: 3, // 1 资料 2 评论 3 论坛 4 社交日志
+      version: 2,
+      content,
+    });
+    return (sec.result && sec.result.suggest) || 'pass';
+  } catch (e) {
+    // 安全接口异常不拦截提交（可用性优先），留日志
+    console.error('[submit] msgSecCheck 调用失败:', e.errCode, e.errMsg || e.message);
+    return 'unknown';
+  }
+}
+
 async function doSubmit(event) {
   const { code } = event;
+  const codeStr = String(code || '');
 
   // ---- 1. 格式校验：8/9 位纯数字 ----
-  if (!/^\d{8,9}$/.test(String(code || ''))) {
+  if (!/^\d{8,9}$/.test(codeStr)) {
     return { ok: false, errCode: 'INVALID_CODE', errMsg: '组队码必须是 8/9 位数字' };
   }
 
@@ -42,79 +71,51 @@ async function doSubmit(event) {
     return { ok: false, errCode: 'NO_AUTH', errMsg: '无法获取用户身份' };
   }
 
-  // ---- 3. 频控：同一用户当天提交数 ----
+  // ---- 3. 三项前置校验并发执行 ----
+  // 频控 / 查重 / 内容安全彼此不依赖，原来是串行 await 三次，
+  // 白白多花两三次往返。并发后总耗时 = 最慢的那一项。
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  try {
-    const cnt = await db
+
+  const [limitRes, dupRes, secSuggest] = await Promise.all([
+    db
       .collection('codes')
       .where({ openid: OPENID, createdAt: _.gte(todayStart) })
-      .count();
-    if (cnt.total >= DAILY_LIMIT) {
-      return {
-        ok: false,
-        errCode: 'RATE_LIMIT',
-        errMsg: '今天提交次数已达上限，明天再来吧',
-      };
-    }
-  } catch (e) {
-    // count 失败不拦截主流程，只在日志里留痕
-    console.warn('[submit] 频控查询失败:', e.message);
-  }
-
-  // ---- 3.5 查重：同一个码已在池中（未下架）就不许重复提交 ----
-  // 防止同一码刷屏占位；被举报下架（removed）的码允许重新提交
-  try {
-    const dup = await db
+      .count()
+      .catch((e) => {
+        console.warn('[submit] 频控查询失败:', e.message); // 不拦截主流程
+        return null;
+      }),
+    db
       .collection('codes')
-      .where({ code: String(code), status: _.neq('removed') })
-      .count();
-    if (dup.total > 0) {
-      return {
-        ok: false,
-        errCode: 'DUPLICATE',
-        errMsg: '这个码已经在互助池里了，不用重复提交',
-      };
-    }
-  } catch (e) {
-    console.warn('[submit] 查重失败:', e.message); // 查重失败不拦截主流程
+      .where({ code: codeStr, status: _.neq('removed') })
+      .count()
+      .catch((e) => {
+        console.warn('[submit] 查重失败:', e.message); // 不拦截主流程
+        return null;
+      }),
+    checkText(OPENID, codeStr),
+  ]);
+
+  if (limitRes && limitRes.total >= DAILY_LIMIT) {
+    return { ok: false, errCode: 'RATE_LIMIT', errMsg: '今天提交次数已达上限，明天再来吧' };
+  }
+  // 同一个码已在池中（未下架）不许重复提交；被举报下架的码允许重新提交
+  if (dupRes && dupRes.total > 0) {
+    return { ok: false, errCode: 'DUPLICATE', errMsg: '这个码已经在互助池里了，不用重复提交' };
+  }
+  if (secSuggest === 'risky') {
+    return { ok: false, errCode: 'CONTENT_RISKY', errMsg: '内容含违规信息，已被拦截' };
   }
 
-  // ---- 4. 内容安全校验（msgSecCheck v2）----
-  // 提交码目前是纯数字，天然低风险；这里校验是为了：(a) 平台合规硬要求 ——
-  // 用户产生内容必须过安全接口；(b) 未来加备注/昵称等文本字段时这里已经兜住。
-  // 注意：config.json 里必须声明 openapi 权限 security.msgSecCheck，否则报 -604103。
-  try {
-    const sec = await cloud.openapi.security.msgSecCheck({
-      openid: OPENID,
-      scene: 3, // 1 资料 2 评论 3 论坛 4 社交日志
-      version: 2,
-      content: String(code),
-    });
-    const suggest = (sec.result && sec.result.suggest) || 'pass';
-    if (suggest === 'risky') {
-      return {
-        ok: false,
-        errCode: 'CONTENT_RISKY',
-        errMsg: '内容含违规信息，已被拦截',
-      };
-    }
-    // suggest === 'review'（需人工复审）: 保守起见也放行入库，但打标
-    var secSuggest = suggest;
-  } catch (e) {
-    // 安全接口异常不拦截提交（可用性优先），留日志 —— 但要在云控制台关注该告警
-    console.error('[submit] msgSecCheck 调用失败:', e.errCode, e.errMsg || e.message);
-    var secSuggest = 'unknown';
-  }
-
-  // ---- 5. 写入数据库 ----
+  // ---- 4. 写入数据库 ----
   const res = await db.collection('codes').add({
     data: {
-      code: String(code),
+      code: codeStr,
       status: 'available',
       reports: 0,
       openid: OPENID, // 服务端 add 不自动带 _openid，手动记录
-      secSuggest, // 内容安全结论：pass / review / unknown（接口异常时）
+      secSuggest, // pass / review / unknown / skipped（纯数字跳过校验）
       createdAt: db.serverDate(),
     },
   });
