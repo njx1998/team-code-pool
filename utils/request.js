@@ -85,8 +85,16 @@ async function safe(fn, fallback) {
 
 // 顶部统计：今日发码人数 / 可用数 / 累计提交数
 // 三个数字都是对 codes 集合的真实计数 —— 数据库为空时自然从 0 开始
-// 累计数带展示基数：真实计数 + BASELINE_TOTAL（起步量级，避免新站累计 0 的尴尬）
+// 累计数展示基数：真实计数 + BASELINE_TOTAL（起步量级，避免新站累计 0 的尴尬）
 const BASELINE_TOTAL = 98000;
+
+// 累计数文案：< 1万 原样；1万~10万 用「x.x万」（如 9.8万）；≥ 10万 进位整数（如 10万、15万）
+function fmtTotal(n) {
+  if (n < 10000) return String(n);
+  const w = n / 10000;
+  if (n < 100000) return (Math.floor(w * 10) / 10).toFixed(1) + '万';
+  return Math.round(w) + '万';
+}
 
 async function fetchStats() {
   const todayStart = new Date();
@@ -103,9 +111,9 @@ async function fetchStats() {
     return {
       todayCount: today.total,
       availableCount: avail.total,
-      totalText: String(total.total + BASELINE_TOTAL),
+      totalText: fmtTotal(total.total + BASELINE_TOTAL),
     };
-  }, { todayCount: 0, availableCount: 0, totalText: String(BASELINE_TOTAL) });
+  }, { todayCount: 0, availableCount: 0, totalText: fmtTotal(BASELINE_TOTAL) });
 }
 
 // 互助池列表：最近 20 条未下架的码，按提交时间倒序
