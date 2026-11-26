@@ -3,11 +3,30 @@
   "packOptions": {
     "include": [],
     "ignore": [
-      { "type": "file", "value": "README.md" },
-      { "type": "file", "value": "preview-qr.png" },
-      { "type": "file", "value": ".gitignore" },
-      { "type": "folder", "value": ".git" },
-      { "type": "folder", "value": ".workbuddy" }
+      {
+        "value": "README.md",
+        "type": "file"
+      },
+      {
+        "value": "preview-qr.png",
+        "type": "file"
+      },
+      {
+        "value": ".gitignore",
+        "type": "file"
+      },
+      {
+        "value": ".git",
+        "type": "folder"
+      },
+      {
+        "value": ".workbuddy",
+        "type": "folder"
+      },
+      {
+        "value": "docs",
+        "type": "folder"
+      }
     ]
   },
   "setting": {
@@ -15,11 +34,30 @@
     "es6": true,
     "minified": true,
     "postcss": true,
-    "urlCheck": true
+    "urlCheck": true,
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "enhance": false,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
   },
   "compileType": "miniprogram",
   "cloudfunctionRoot": "cloudfunctions/",
   "appid": "wx948d81689638c34d",
   "projectname": "team-code-pool",
-  "miniprogramRoot": "./"
+  "miniprogramRoot": "./",
+  "simulatorPluginLibVersion": {},
+  "editorSetting": {}
 }
